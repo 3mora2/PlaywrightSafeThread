@@ -10,7 +10,7 @@ from threading import Thread, Event
 import psutil
 from playwright.async_api import async_playwright, Page, Browser, BrowserType
 from playwright_stealth import stealth_async
-from PlaywrightSafeThread.PlaywrightSafeThread.browser.plawright_shim import run_playwright
+from PlaywrightSafeThread.browser.plawright_shim import run_playwright
 
 UNIX = "windows" not in platform.system().lower()
 LTE_PY37 = platform.python_version_tuple()[:2] <= ("3", "7")
@@ -208,7 +208,7 @@ class ThreadsafeBrowser:
         # NOTE: on unix python 3.7, child watching does not
         # work properly when asyncio is not running from the main thread
         if UNIX and LTE_PY37:
-            from PlaywrightSafeThread.PlaywrightSafeThread.__future__.threaded_child_watcher import ThreadedChildWatcher
+            from PlaywrightSafeThread.__future__.threaded_child_watcher import ThreadedChildWatcher
             asyncio.set_child_watcher(ThreadedChildWatcher())
 
         self._stealthy = stealthy

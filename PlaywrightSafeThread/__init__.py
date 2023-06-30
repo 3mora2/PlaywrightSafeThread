@@ -1,1 +1,1 @@
-from PlaywrightSafeThread.PlaywrightSafeThread.browser.threadsafe_browser import ThreadsafeBrowser
+from PlaywrightSafeThread.browser.threadsafe_browser import ThreadsafeBrowser
