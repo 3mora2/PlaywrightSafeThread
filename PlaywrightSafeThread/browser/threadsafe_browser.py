@@ -15,9 +15,8 @@ from PlaywrightSafeThread.browser.plawright_shim import run_playwright
 UNIX = "windows" not in platform.system().lower()
 LTE_PY37 = platform.python_version_tuple()[:2] <= ("3", "7")
 
-SUPPORTED_BROWSERS = ("chromium", "firefox")
-
-BrowserName = Literal["chromium", "firefox"]
+SUPPORTED_BROWSERS = ("chromium", "firefox", "webkit")
+BrowserName = Literal[*SUPPORTED_BROWSERS]
 T = TypeVar("T")
 P = ParamSpec("P")
 PageCallable = Callable[Concatenate[Page, P], Awaitable[T]]
@@ -244,6 +243,8 @@ class ThreadsafeBrowser:
             browser_type = self.playwright.chromium
         elif self._browser_name == "firefox":
             browser_type = self.playwright.firefox
+        elif self._browser_name == "webkit":
+            browser_type = self.playwright.webkit
         else:
             raise TypeError("unsupported browser")
 

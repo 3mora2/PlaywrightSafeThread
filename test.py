@@ -4,4 +4,3 @@ th = ThreadsafeBrowser(browser="chromium", channel="chrome", install=False, head
 th.get("https://web.whatsapp.com/", wait_until="domcontentloaded")
 print(th.page_evaluate("""() => {return (typeof window.WAPI !== 'undefined' &&typeof window.Store !== 'undefined');}"""))
 th.page_wait_for_function("() => (window?.webpackChunkwhatsapp_web_client?.length || 0) > 3")
-
