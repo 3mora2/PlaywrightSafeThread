@@ -8,9 +8,10 @@ import asyncio
 import platform
 from threading import Thread, Event
 import psutil
+from playwright._impl import _api_types
 from playwright.async_api import async_playwright, Page, Browser, BrowserType
 from playwright_stealth import stealth_async
-from PlaywrightSafeThread.browser.plawright_shim import run_playwright
+from WPP_Whatsapp.PlaywrightSafeThread.browser.plawright_shim import run_playwright
 
 UNIX = "windows" not in platform.system().lower()
 LTE_PY37 = platform.python_version_tuple()[:2] <= ("3", "7")
@@ -28,7 +29,7 @@ class ThreadsafeBrowser:
             self,
             browser: BrowserName = "chromium",
             stealthy: bool = False,
-            install: bool = True,
+            install: bool = False,
             **kwargs
     ) -> None:
         """
@@ -207,21 +208,27 @@ class ThreadsafeBrowser:
         # NOTE: on unix python 3.7, child watching does not
         # work properly when asyncio is not running from the main thread
         if UNIX and LTE_PY37:
-            from PlaywrightSafeThread.__future__.threaded_child_watcher import ThreadedChildWatcher
+            from WPP_Whatsapp.PlaywrightSafeThread._future_.threaded_child_watcher import ThreadedChildWatcher
             asyncio.set_child_watcher(ThreadedChildWatcher())
 
         self._stealthy = stealthy
         self._browser_name = browser
 
         self._browser_option = {}
+        self._browser_persistent_option = {}
         self._context_option = {}
 
         # get parameters foreach function
         __browser_option = inspect.getfullargspec(BrowserType.launch).kwonlyargs
+        __browser_persistent_option = inspect.getfullargspec(BrowserType.launch_persistent_context).kwonlyargs + [
+            "user_data_dir"]
         __context_option = inspect.getfullargspec(Browser.new_context).kwonlyargs
+
         for key in kwargs:
             if key in __browser_option:
                 self._browser_option.update({key: kwargs[key]})
+            if key in __browser_persistent_option:
+                self._browser_persistent_option.update({key: kwargs[key]})
             if key in __context_option:
                 self._context_option.update({key: kwargs[key]})
 
@@ -251,21 +258,27 @@ class ThreadsafeBrowser:
         # TODO: we need to find a way to force frozen executable to use the same
         # directory as non-frozen one, e.g. by mangling PLAYWRIGHT_BROWSERS_PATH
         # or sys.frozen
-        if self._browser_option.get("user_data_dir"):
-            self.check_profile(self._browser_option.get("user_data_dir"))
-            self.context = await browser_type.launch_persistent_context(**self._browser_option, **self._context_option)
-            self.browser = self.context.browser
+        if self._browser_persistent_option.get("user_data_dir"):
+            self.check_profile(self._browser_persistent_option.get("user_data_dir"))
+            self.context = await browser_type.launch_persistent_context(**self._browser_persistent_option)
+            self._browser = self.context.browser or self.context
         else:
-            self.browser = await browser_type.launch(**self._browser_option)
+            self._browser = await browser_type.launch(**self._browser_option)
             self.context = await self.browser.new_context(**self._context_option)
 
-        self.page = await self.first_page()
+        self._page = await self.first_page()
+
+    @property
+    def page(self):
+        return self._page
+
+    @property
+    def browser(self):
+        return self._browser
 
     async def first_page(self):
-        if hasattr(self.browser, "pages"):
-            page = self.browser.pages[0] if self.browser.pages else await self.browser.new_page()
-        else:
-            page = await self.browser.new_page(**self._context_option)
+        page = self.context.pages[0] if self.context.pages else await self.context.new_page()
+
         if self._stealthy:
             await stealth_async(page)
         return page
@@ -322,60 +335,64 @@ class ThreadsafeBrowser:
 
         self.loop.run_until_complete(self.__stop_playwright())
 
-    async def __call(self, fn: Callable, *args, **kwargs):
-        return await fn(self.browser, *args, **kwargs)
+    async def page_evaluate(self, expression: str, arg: typing.Optional[typing.Any] = None):
+        return await self.page.evaluate(expression, arg)
 
-    async def __call_with_new_page(
-            self, fn: Callable, *args, url: Optional[str] = None, **kwargs
-    ):
-        async with await self.browser.new_context() as context:
-            async with await context.new_page() as page:
-                if self._stealthy:
-                    await stealth_async(page)
+    def sync_page_evaluate(self, expression: str, arg: typing.Optional[typing.Any] = None):
+        try:
+            return self.run_threadsafe(self.page.evaluate, expression, arg)
+        except _api_types.Error as error:
+            if "Execution context was destroyed, most likely because of a navigation" in error.message:
+                pass
+            elif "ReferenceError: WPP is not defined" in error.message:
+                pass
+            else:
+                raise error
 
-                if url is not None:
-                    await page.goto(url)
-                return await fn(page, *args, **kwargs)
+    async def page_wait_for_function(self, expression, arg=None, timeout: typing.Optional[float] = None,
+                                     polling: typing.Optional[typing.Union[float, Literal["raf"]]] = None):
 
-    def run(self, fn: BrowserCallable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
-        future = asyncio.run_coroutine_threadsafe(
-            self.__call(fn, *args, **kwargs), self.loop
-        )
+        return await self.page.wait_for_function(expression, arg=arg, timeout=timeout, polling=polling)
 
-        return future.result()
-
-    def run_with_new_page(
-            self,
-            fn: PageCallable[P, T],
-            url: Optional[str] = None,
-            *args: P.args,
-            **kwargs: P.kwargs
-    ) -> T:
-        future = asyncio.run_coroutine_threadsafe(
-            self.__call_with_new_page(fn, *args, url=url, **kwargs), self.loop
-        )
-
-        return future.result()
-
-    def get(self, url, *args, **kwargs):
-        future = asyncio.run_coroutine_threadsafe(
-            self.page.goto(url, *args, **kwargs), self.loop
-        )
-        return future.result()
-
-    def page_evaluate(self, expression: str, arg: typing.Optional[typing.Any] = None):
-        return self.run_threadsafe(self.page.evaluate, expression, arg)
-
-    def page_wait_for_function(self, expression, arg=None, timeout: typing.Optional[float] = None,
-                               polling: typing.Optional[typing.Union[float, Literal["raf"]]] = None):
+    def sync_page_wait_for_function(self, expression, arg=None, timeout: typing.Optional[float] = None,
+                                    polling: typing.Optional[typing.Union[float, Literal["raf"]]] = None):
 
         return self.run_threadsafe(self.page.wait_for_function, expression, arg=arg, timeout=timeout, polling=polling)
 
+    async def expose_function(self, *args, **kwargs):
+        return await self.page.expose_function(*args, **kwargs)
+
+    def sync_expose_function(self, *args, **kwargs):
+        return self.run_threadsafe(self.page.expose_function, *args, **kwargs)
+
+    async def add_script_tag(self, *args, **kwargs):
+        return await self.page.add_script_tag(*args, **kwargs)
+
+    def sync_add_script_tag(self, *args, **kwargs):
+        return self.run_threadsafe(self.page.add_script_tag, *args, **kwargs)
+
+    async def close(self):
+        await self.page.close()
+        await self.context.close()
+        self.stop()
+
+    def sync_close(self):
+        self.run_threadsafe(self.page.close)
+        self.run_threadsafe(self.context.close)
+        self.stop()
+
+    def sleep(self, *args, **kwargs):
+        self.run_threadsafe(asyncio.sleep, *args, **kwargs)
+
+    async def goto(self, *args, **kwargs):
+        await self.page.goto(*args, **kwargs)
+
+    def sync_goto(self, *args, **kwargs):
+        self.run_threadsafe(self.page.goto, *args, **kwargs)
+
     def run_threadsafe(self, func, *args, **kwargs):
-        if inspect.iscoroutinefunction(func):
-            future = asyncio.run_coroutine_threadsafe(
-                func(*args, **kwargs), self.loop
-            )
-            return future.result()
-        else:
-            return func(*args, **kwargs)
+        future = asyncio.run_coroutine_threadsafe(
+            func(*args, **kwargs), self.loop
+        )
+        result = future.result(timeout=10)
+        return result
