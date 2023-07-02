@@ -11,7 +11,7 @@ import psutil
 from playwright._impl import _api_types
 from playwright.async_api import async_playwright, Page, Browser, BrowserType
 from playwright_stealth import stealth_async
-from WPP_Whatsapp.PlaywrightSafeThread.browser.plawright_shim import run_playwright
+from PlaywrightSafeThread.browser.plawright_shim import run_playwright
 
 UNIX = "windows" not in platform.system().lower()
 LTE_PY37 = platform.python_version_tuple()[:2] <= ("3", "7")
