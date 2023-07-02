@@ -6,3 +6,5 @@ used in [WPP_Whatsapp](https://github.com/3mora2/WPP_Whatsapp)
 use sync in only one at time, else use async
 
 in events like `page.on` use async and wait
+
+from [minet](https://github.com/medialab/minet/blob/master/minet/browser/threadsafe_browser.py)
