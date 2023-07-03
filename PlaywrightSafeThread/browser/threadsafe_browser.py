@@ -2,13 +2,11 @@
 
 import inspect
 import os
-import typing
-from typing import Callable, Optional, TypeVar, Awaitable, Literal, ParamSpec, Concatenate
+from typing import Callable, TypeVar, Awaitable, Literal, ParamSpec, Concatenate
 import asyncio
 import platform
 from threading import Thread, Event
 import psutil
-from playwright._impl import _api_types
 from playwright.async_api import async_playwright, Page, Browser, BrowserType
 from playwright_stealth import stealth_async
 from PlaywrightSafeThread.browser.plawright_shim import run_playwright
@@ -25,6 +23,7 @@ BrowserCallable = Callable[Concatenate[Browser, P], Awaitable[T]]
 
 
 class ThreadsafeBrowser:
+
     def __init__(
             self,
             browser: BrowserName = "chromium",
@@ -208,7 +207,7 @@ class ThreadsafeBrowser:
         # NOTE: on unix python 3.7, child watching does not
         # work properly when asyncio is not running from the main thread
         if UNIX and LTE_PY37:
-            from WPP_Whatsapp.PlaywrightSafeThread._future_.threaded_child_watcher import ThreadedChildWatcher
+            from PlaywrightSafeThread._future_.threaded_child_watcher import ThreadedChildWatcher
             asyncio.set_child_watcher(ThreadedChildWatcher())
 
         self._stealthy = stealthy
@@ -261,22 +260,49 @@ class ThreadsafeBrowser:
         if self._browser_persistent_option.get("user_data_dir"):
             self.check_profile(self._browser_persistent_option.get("user_data_dir"))
             self.context = await browser_type.launch_persistent_context(**self._browser_persistent_option)
-            self._browser = self.context.browser or self.context
+            self.browser = self.context.browser or self.context
         else:
-            self._browser = await browser_type.launch(**self._browser_option)
+            self.browser = await browser_type.launch(**self._browser_option)
             self.context = await self.browser.new_context(**self._context_option)
 
         self._page = await self.first_page()
 
     @property
     def page(self):
+        # convert all async to sync and them to self.page.sync_
+        if not hasattr(self._page, "sync_"):
+            self._page.sync_ = PageSafe(self._page, self.run_threadsafe)
+        if not hasattr(self._page, "async_"):
+            class PageSafeA:
+                def __init__(self, page: "Page"):
+                    """
+                    call All Async Function
+                    Args:
+                        page:
+                    """
+                    for key in page.__dir__():
+                        if key.startswith("_"):
+                            continue
+
+                        func = page.__getattribute__(key)
+                        if inspect.ismethod(func):
+                            self.__setattr__(key, self.call(func))
+
+                @staticmethod
+                def call(func):
+                    return lambda *args, **kwargs: func(*args, **kwargs)
+
+            self._page.async_ = PageSafeA(self._page)
+
         return self._page
 
-    @property
-    def browser(self):
-        return self._browser
+    async def goto(self, *args, **kwargs):
+        print("rr")
+        r = await self._page.goto(*args, **kwargs)
+        print(r)
+        return r
 
-    async def first_page(self):
+    async def first_page(self) -> "Page":
         page = self.context.pages[0] if self.context.pages else await self.context.new_page()
 
         if self._stealthy:
@@ -335,42 +361,6 @@ class ThreadsafeBrowser:
 
         self.loop.run_until_complete(self.__stop_playwright())
 
-    async def page_evaluate(self, expression: str, arg: typing.Optional[typing.Any] = None):
-        return await self.page.evaluate(expression, arg)
-
-    def sync_page_evaluate(self, expression: str, arg: typing.Optional[typing.Any] = None):
-        try:
-            return self.run_threadsafe(self.page.evaluate, expression, arg)
-        except _api_types.Error as error:
-            if "Execution context was destroyed, most likely because of a navigation" in error.message:
-                pass
-            elif "ReferenceError: WPP is not defined" in error.message:
-                pass
-            else:
-                raise error
-
-    async def page_wait_for_function(self, expression, arg=None, timeout: typing.Optional[float] = None,
-                                     polling: typing.Optional[typing.Union[float, Literal["raf"]]] = None):
-
-        return await self.page.wait_for_function(expression, arg=arg, timeout=timeout, polling=polling)
-
-    def sync_page_wait_for_function(self, expression, arg=None, timeout: typing.Optional[float] = None,
-                                    polling: typing.Optional[typing.Union[float, Literal["raf"]]] = None):
-
-        return self.run_threadsafe(self.page.wait_for_function, expression, arg=arg, timeout=timeout, polling=polling)
-
-    async def expose_function(self, *args, **kwargs):
-        return await self.page.expose_function(*args, **kwargs)
-
-    def sync_expose_function(self, *args, **kwargs):
-        return self.run_threadsafe(self.page.expose_function, *args, **kwargs)
-
-    async def add_script_tag(self, *args, **kwargs):
-        return await self.page.add_script_tag(*args, **kwargs)
-
-    def sync_add_script_tag(self, *args, **kwargs):
-        return self.run_threadsafe(self.page.add_script_tag, *args, **kwargs)
-
     async def close(self):
         await self.page.close()
         await self.context.close()
@@ -381,18 +371,42 @@ class ThreadsafeBrowser:
         self.run_threadsafe(self.context.close)
         self.stop()
 
-    def sleep(self, *args, **kwargs):
-        self.run_threadsafe(asyncio.sleep, *args, **kwargs)
-
-    async def goto(self, *args, **kwargs):
-        await self.page.goto(*args, **kwargs)
-
-    def sync_goto(self, *args, **kwargs):
-        self.run_threadsafe(self.page.goto, *args, **kwargs)
-
     def run_threadsafe(self, func, *args, **kwargs):
         future = asyncio.run_coroutine_threadsafe(
             func(*args, **kwargs), self.loop
         )
         result = future.result(timeout=10)
         return result
+
+    @property
+    def sync_(self) -> "Page":
+        return self.page.sync_
+
+    @property
+    def async_(self) -> "Page":
+        return self.page.async_
+
+
+class PageSafe:
+    def __init__(self, page: "Page", _run_threadsafe):
+        """
+        Convert All Async Function To Sync
+        Args:
+            page:
+            _run_threadsafe:
+        """
+        self._run_threadsafe = _run_threadsafe
+        for key in page.__dir__():
+            if key.startswith("_"):
+                continue
+
+            func = page.__getattribute__(key)
+            if inspect.iscoroutinefunction(func):
+                self.__setattr__(key, self.async_func(func))
+
+    def async_func(self, func):
+        return lambda *args, **kwargs: self._run_threadsafe(func, *args, **kwargs)
+
+
+
+

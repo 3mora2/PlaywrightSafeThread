@@ -1,6 +1,6 @@
-greenlet==2.0.2
-playwright==1.35.0
-playwright-stealth==1.0.5
-psutil==5.9.5
-pyee==9.0.4
-typing_extensions==4.7.0
+greenlet
+playwright
+playwright-stealth
+psutil
+pyee
+typing_extensions
