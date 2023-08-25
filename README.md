@@ -8,3 +8,8 @@ use sync in only one at time, else use async
 in events like `page.on` use async and wait
 
 from [minet](https://github.com/medialab/minet/blob/master/minet/browser/threadsafe_browser.py)
+
+### Installation
+```
+pip install git+https://www.github.com/3mora2/PlaywrightSafeThread@main
+```
