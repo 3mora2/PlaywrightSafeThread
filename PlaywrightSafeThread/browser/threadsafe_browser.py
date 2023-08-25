@@ -261,11 +261,43 @@ class ThreadsafeBrowser:
             self.check_profile(self._browser_persistent_option.get("user_data_dir"))
             self.context = await browser_type.launch_persistent_context(**self._browser_persistent_option)
             self.browser = self.context.browser or self.context
+            self._api_request_context = self.context.request
         else:
             self.browser = await browser_type.launch(**self._browser_option)
             self.context = await self.browser.new_context(**self._context_option)
+            self._api_request_context = self.context.request
 
         self._page = await self.first_page()
+
+    @property
+    def api_request_context(self):
+        # convert all async to sync and them to self.page.sync_
+        if not hasattr(self._api_request_context, "sync_"):
+            self._api_request_context.sync_ = PageSafe(self._api_request_context, self.run_threadsafe)
+
+        if not hasattr(self._api_request_context, "async_"):
+            class PageSafeA:
+                def __init__(self, page):
+                    """
+                    call All Async Function
+                    Args:
+                        page:
+                    """
+                    for key in page.__dir__():
+                        if key.startswith("_"):
+                            continue
+
+                        func = page.__getattribute__(key)
+                        if inspect.ismethod(func):
+                            self.__setattr__(key, self.call(func))
+
+                @staticmethod
+                def call(func):
+                    return lambda *args, **kwargs: func(*args, **kwargs)
+
+            self._api_request_context.async_ = PageSafeA(self._api_request_context)
+
+        return self._api_request_context
 
     @property
     def page(self):
@@ -297,9 +329,7 @@ class ThreadsafeBrowser:
         return self._page
 
     async def goto(self, *args, **kwargs):
-        print("rr")
         r = await self._page.goto(*args, **kwargs)
-        print(r)
         return r
 
     async def first_page(self) -> "Page":
@@ -388,7 +418,7 @@ class ThreadsafeBrowser:
 
 
 class PageSafe:
-    def __init__(self, page: "Page", _run_threadsafe):
+    def __init__(self, page, _run_threadsafe):
         """
         Convert All Async Function To Sync
         Args:
