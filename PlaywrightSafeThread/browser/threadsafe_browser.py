@@ -6,10 +6,8 @@ from typing import Callable, TypeVar, Awaitable, Literal, ParamSpec, Concatenate
 import asyncio
 import platform
 from threading import Thread, Event
-import psutil
 from playwright.async_api import async_playwright, Page, Browser, BrowserType
-from playwright_stealth import stealth_async
-from PlaywrightSafeThread.browser.plawright_shim import run_playwright
+
 
 UNIX = "windows" not in platform.system().lower()
 LTE_PY37 = platform.python_version_tuple()[:2] <= ("3", "7")
@@ -232,6 +230,7 @@ class ThreadsafeBrowser:
                 self._context_option.update({key: kwargs[key]})
 
         if install:
+            from PlaywrightSafeThread.browser.plawright_shim import run_playwright
             run_playwright("install", self._browser_name)
 
         self.loop = asyncio.new_event_loop()
@@ -336,11 +335,13 @@ class ThreadsafeBrowser:
         page = self.context.pages[0] if self.context.pages else await self.context.new_page()
 
         if self._stealthy:
+            from playwright_stealth import stealth_async
             await stealth_async(page)
         return page
 
     @staticmethod
     def check_profile(path):
+        import psutil
         path_old = set()
         for proc in psutil.process_iter():
             if "chrome.exe" in proc.name():
