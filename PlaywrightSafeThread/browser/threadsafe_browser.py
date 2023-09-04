@@ -256,7 +256,8 @@ class ThreadsafeBrowser:
         # directory as non-frozen one, e.g. by mangling PLAYWRIGHT_BROWSERS_PATH
         # or sys.frozen
         if self._browser_persistent_option.get("user_data_dir"):
-            self.check_profile(self._browser_persistent_option.get("user_data_dir"))
+            # ToDo: check_profile
+            # self.check_profile(self._browser_persistent_option.get("user_data_dir"))
             self.context = await browser_type.launch_persistent_context(**self._browser_persistent_option)
             self.browser = self.context.browser or self.context
             self._api_request_context = self.context.request
