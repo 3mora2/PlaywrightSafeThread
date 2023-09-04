@@ -6,8 +6,7 @@ from typing import Callable, TypeVar, Awaitable, Literal, ParamSpec, Concatenate
 import asyncio
 import platform
 from threading import Thread, Event
-from playwright.async_api import async_playwright, Page, Browser, BrowserType
-
+from playwright.async_api import async_playwright, Page, Browser, BrowserType, APIRequestContext
 
 UNIX = "windows" not in platform.system().lower()
 LTE_PY37 = platform.python_version_tuple()[:2] <= ("3", "7")
@@ -272,7 +271,7 @@ class ThreadsafeBrowser:
     def api_request_context(self):
         # convert all async to sync and them to self.page.sync_
         if not hasattr(self._api_request_context, "sync_"):
-            self._api_request_context.sync_ = PageSafe(self._api_request_context, self.run_threadsafe)
+            self._api_request_context.sync_:"APIRequestContext" = PageSafe(self._api_request_context, self.run_threadsafe)
 
         if not hasattr(self._api_request_context, "async_"):
             class PageSafeA:
@@ -294,7 +293,7 @@ class ThreadsafeBrowser:
                 def call(func):
                     return lambda *args, **kwargs: func(*args, **kwargs)
 
-            self._api_request_context.async_ = PageSafeA(self._api_request_context)
+            self._api_request_context.async_:"APIRequestContext" = PageSafeA(self._api_request_context)
 
         return self._api_request_context
 
@@ -302,7 +301,7 @@ class ThreadsafeBrowser:
     def page(self):
         # convert all async to sync and them to self.page.sync_
         if not hasattr(self._page, "sync_"):
-            self._page.sync_ = PageSafe(self._page, self.run_threadsafe)
+            self._page.sync_:"Page" = PageSafe(self._page, self.run_threadsafe)
         if not hasattr(self._page, "async_"):
             class PageSafeA:
                 def __init__(self, page: "Page"):
@@ -323,7 +322,7 @@ class ThreadsafeBrowser:
                 def call(func):
                     return lambda *args, **kwargs: func(*args, **kwargs)
 
-            self._page.async_ = PageSafeA(self._page)
+            self._page.async_:"Page" = PageSafeA(self._page)
 
         return self._page
 
