@@ -12,7 +12,7 @@ UNIX = "windows" not in platform.system().lower()
 LTE_PY37 = platform.python_version_tuple()[:2] <= ("3", "7")
 
 SUPPORTED_BROWSERS = ("chromium", "firefox", "webkit")
-BrowserName = Literal[*SUPPORTED_BROWSERS]
+BrowserName = Literal["chromium", "firefox", "webkit"]
 T = TypeVar("T")
 P = ParamSpec("P")
 PageCallable = Callable[Concatenate[Page, P], Awaitable[T]]
@@ -26,6 +26,8 @@ class ThreadsafeBrowser:
             browser: BrowserName = "chromium",
             stealthy: bool = False,
             install: bool = False,
+            check_open_dir=True,
+            close_already_profile=True,
             **kwargs
     ) -> None:
         """
@@ -232,6 +234,9 @@ class ThreadsafeBrowser:
             from PlaywrightSafeThread.browser.plawright_shim import run_playwright
             run_playwright("install", self._browser_name)
 
+        self.__check_open_dir = check_open_dir
+        self.__close_already_profile = close_already_profile
+
         self.loop = asyncio.new_event_loop()
         self.start_event = Event()
         self.thread = Thread(target=self.__thread_worker)
@@ -257,7 +262,8 @@ class ThreadsafeBrowser:
         # or sys.frozen
         if self._browser_persistent_option.get("user_data_dir"):
             # ToDo: check_profile
-            # self.check_profile(self._browser_persistent_option.get("user_data_dir"))
+            if self.__check_open_dir:
+                self.check_close_profile(self._browser_persistent_option.get("user_data_dir"))
             self.context = await browser_type.launch_persistent_context(**self._browser_persistent_option)
             self.browser = self.context.browser or self.context
             self._api_request_context = self.context.request
@@ -272,7 +278,8 @@ class ThreadsafeBrowser:
     def api_request_context(self):
         # convert all async to sync and them to self.page.sync_
         if not hasattr(self._api_request_context, "sync_"):
-            self._api_request_context.sync_:"APIRequestContext" = PageSafe(self._api_request_context, self.run_threadsafe)
+            self._api_request_context.sync_: "APIRequestContext" = PageSafe(self._api_request_context,
+                                                                            self.run_threadsafe)
 
         if not hasattr(self._api_request_context, "async_"):
             class PageSafeA:
@@ -294,7 +301,7 @@ class ThreadsafeBrowser:
                 def call(func):
                     return lambda *args, **kwargs: func(*args, **kwargs)
 
-            self._api_request_context.async_:"APIRequestContext" = PageSafeA(self._api_request_context)
+            self._api_request_context.async_: "APIRequestContext" = PageSafeA(self._api_request_context)
 
         return self._api_request_context
 
@@ -302,7 +309,7 @@ class ThreadsafeBrowser:
     def page(self):
         # convert all async to sync and them to self.page.sync_
         if not hasattr(self._page, "sync_"):
-            self._page.sync_:"Page" = PageSafe(self._page, self.run_threadsafe)
+            self._page.sync_: "Page" = PageSafe(self._page, self.run_threadsafe)
         if not hasattr(self._page, "async_"):
             class PageSafeA:
                 def __init__(self, page: "Page"):
@@ -323,7 +330,7 @@ class ThreadsafeBrowser:
                 def call(func):
                     return lambda *args, **kwargs: func(*args, **kwargs)
 
-            self._page.async_:"Page" = PageSafeA(self._page)
+            self._page.async_: "Page" = PageSafeA(self._page)
 
         return self._page
 
@@ -339,25 +346,31 @@ class ThreadsafeBrowser:
             await stealth_async(page)
         return page
 
-    @staticmethod
-    def check_profile(path):
+    def check_close_profile(self, path):
         import psutil
         path_old = set()
         for proc in psutil.process_iter():
-            if "chrome.exe" in proc.name():
+            name = proc.name()
+            if "chrome.exe" in name:
                 cmd = proc.cmdline()
                 user = list(filter(lambda x: "--user-data-dir" in x, cmd))
                 if user:
-                    path_old.add(os.path.normpath(user[0].split("=")[-1]))
+                    # path_old.add(p)
+                    p = os.path.normpath(user[0].split("=")[-1])
+                    if os.path.normpath(path) == p and self.__close_already_profile:
+                        proc.terminate()
 
-            elif "firefox.exe" in proc.name():
+            elif "firefox.exe" in name:
                 cmd = proc.cmdline()
                 user = list(filter(lambda x: "-profile" in x, cmd))
                 if user:
-                    path_old.add(os.path.normpath(cmd[cmd.index(user[0]) + 1]))
+                    p = os.path.normpath(cmd[cmd.index(user[0]) + 1])
+                    if os.path.normpath(path) == p and self.__close_already_profile:
+                        proc.terminate()
+                    # path_old.add(os.path.normpath(cmd[cmd.index(user[0]) + 1]))
 
-        if os.path.normpath(path) in path_old:
-            raise Exception("Profile Already Open")
+        # if os.path.normpath(path) in path_old:
+        #     raise Exception("Profile Already Open")
 
     async def __stop_playwright(self) -> None:
         # NOTE: we need to make sure those were actually launched, in
@@ -437,7 +450,3 @@ class PageSafe:
 
     def async_func(self, func):
         return lambda *args, **kwargs: self._run_threadsafe(func, *args, **kwargs)
-
-
-
-
