@@ -239,7 +239,7 @@ class ThreadsafeBrowser:
 
         self.loop = asyncio.new_event_loop()
         self.start_event = Event()
-        self.thread = Thread(target=self.__thread_worker)
+        self.thread = Thread(target=self.__thread_worker, daemon=True)
 
         # Starting loop thread
         self.thread.start()
@@ -373,8 +373,12 @@ class ThreadsafeBrowser:
         #     raise Exception("Profile Already Open")
 
     async def __stop_playwright(self) -> None:
+
         # NOTE: we need to make sure those were actually launched, in
         # case of a nasty race condition
+        if hasattr(self, "context"):
+            await self.context.close()
+
         if hasattr(self, "browser"):
             await self.browser.close()
 
@@ -384,7 +388,6 @@ class ThreadsafeBrowser:
 
     def stop(self) -> None:
         self.loop.call_soon_threadsafe(self.loop.stop)
-        self.thread.join()
 
     def __enter__(self):
         return self
@@ -406,14 +409,11 @@ class ThreadsafeBrowser:
         self.loop.run_until_complete(self.__stop_playwright())
 
     async def close(self):
-        await self.page.close()
-        await self.context.close()
+        await self.__stop_playwright()
         self.stop()
 
     def sync_close(self):
-        self.run_threadsafe(self.page.close)
-        self.run_threadsafe(self.context.close)
-        self.stop()
+        self.run_threadsafe(self.close)
 
     def run_threadsafe(self, func, *args, **kwargs):
         future = asyncio.run_coroutine_threadsafe(

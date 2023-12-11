@@ -14,7 +14,7 @@ th = ThreadsafeBrowser(browser="chromium", channel="chrome", install=False, head
 #
 # th.page.on("load", on_load)
 #
-# th.sync_.goto("https://web.whatsapp.com/")
+th.sync_.goto("https://web.whatsapp.com/", wait_until="networkidle")
 # result = th.sync_.evaluate(
 #     """() => {return (typeof window.WAPI !== 'undefined' &&typeof window.Store !== 'undefined');}""")
 # print(result)
