@@ -6,7 +6,7 @@ from typing import Callable, TypeVar, Awaitable, Literal, ParamSpec, Concatenate
 import asyncio
 import platform
 from threading import Thread, Event
-from playwright.async_api import async_playwright, Page, Browser, BrowserType, APIRequestContext
+from playwright.async_api import async_playwright, Page, Browser, BrowserType
 
 UNIX = "windows" not in platform.system().lower()
 LTE_PY37 = platform.python_version_tuple()[:2] <= ("3", "7")
@@ -23,6 +23,7 @@ class ThreadsafeBrowser:
 
     def __init__(
             self,
+            no_context=True,
             browser: BrowserName = "chromium",
             stealthy: bool = False,
             install: bool = False,
@@ -205,11 +206,12 @@ class ThreadsafeBrowser:
 
         # NOTE: on unix python 3.7, child watching does not
         # work properly when asyncio is not running from the main thread
-        if UNIX and LTE_PY37:
-            from PlaywrightSafeThread._future_.threaded_child_watcher import ThreadedChildWatcher
-            asyncio.set_child_watcher(ThreadedChildWatcher())
+        # if UNIX and LTE_PY37:
+        #     from PlaywrightSafeThread._future_.threaded_child_watcher import ThreadedChildWatcher
+        #     asyncio.set_child_watcher(ThreadedChildWatcher())
 
         self._stealthy = stealthy
+        self._no_context = no_context
         self._browser_name = browser
 
         self._browser_option = {}
@@ -249,94 +251,32 @@ class ThreadsafeBrowser:
         self.playwright = await async_playwright().start()
 
         if self._browser_name == "chromium":
-            browser_type = self.playwright.chromium
+            self.browser_type = self.playwright.chromium
         elif self._browser_name == "firefox":
-            browser_type = self.playwright.firefox
+            self.browser_type = self.playwright.firefox
         elif self._browser_name == "webkit":
-            browser_type = self.playwright.webkit
+            self.browser_type = self.playwright.webkit
+        elif self._no_context:
+            pass
         else:
             raise TypeError("unsupported browser")
+        if not self._no_context:
+            # TODO: we need to find a way to force frozen executable to use the same
+            # directory as non-frozen one, e.g. by mangling PLAYWRIGHT_BROWSERS_PATH
+            # or sys.frozen
+            if self._browser_persistent_option.get("user_data_dir"):
+                # ToDo: check_profile
+                if self.__check_open_dir:
+                    self.check_close_profile(self._browser_persistent_option.get("user_data_dir"))
+                self.context = await self.browser_type.launch_persistent_context(**self._browser_persistent_option)
+                self.browser = self.context.browser or self.context
+                self._api_request_context = self.context.request
+            else:
+                self.browser = await self.browser_type.launch(**self._browser_option)
+                self.context = await self.browser.new_context(**self._context_option)
+                self._api_request_context = self.context.request
 
-        # TODO: we need to find a way to force frozen executable to use the same
-        # directory as non-frozen one, e.g. by mangling PLAYWRIGHT_BROWSERS_PATH
-        # or sys.frozen
-        if self._browser_persistent_option.get("user_data_dir"):
-            # ToDo: check_profile
-            if self.__check_open_dir:
-                self.check_close_profile(self._browser_persistent_option.get("user_data_dir"))
-            self.context = await browser_type.launch_persistent_context(**self._browser_persistent_option)
-            self.browser = self.context.browser or self.context
-            self._api_request_context = self.context.request
-        else:
-            self.browser = await browser_type.launch(**self._browser_option)
-            self.context = await self.browser.new_context(**self._context_option)
-            self._api_request_context = self.context.request
-
-        self._page = await self.first_page()
-
-    @property
-    def api_request_context(self):
-        # convert all async to sync and them to self.page.sync_
-        if not hasattr(self._api_request_context, "sync_"):
-            self._api_request_context.sync_: "APIRequestContext" = PageSafe(self._api_request_context,
-                                                                            self.run_threadsafe)
-
-        if not hasattr(self._api_request_context, "async_"):
-            class PageSafeA:
-                def __init__(self, page):
-                    """
-                    call All Async Function
-                    Args:
-                        page:
-                    """
-                    for key in page.__dir__():
-                        if key.startswith("_"):
-                            continue
-
-                        func = page.__getattribute__(key)
-                        if inspect.ismethod(func):
-                            self.__setattr__(key, self.call(func))
-
-                @staticmethod
-                def call(func):
-                    return lambda *args, **kwargs: func(*args, **kwargs)
-
-            self._api_request_context.async_: "APIRequestContext" = PageSafeA(self._api_request_context)
-
-        return self._api_request_context
-
-    @property
-    def page(self):
-        # convert all async to sync and them to self.page.sync_
-        if not hasattr(self._page, "sync_"):
-            self._page.sync_: "Page" = PageSafe(self._page, self.run_threadsafe)
-        if not hasattr(self._page, "async_"):
-            class PageSafeA:
-                def __init__(self, page: "Page"):
-                    """
-                    call All Async Function
-                    Args:
-                        page:
-                    """
-                    for key in page.__dir__():
-                        if key.startswith("_"):
-                            continue
-
-                        func = page.__getattribute__(key)
-                        if inspect.ismethod(func):
-                            self.__setattr__(key, self.call(func))
-
-                @staticmethod
-                def call(func):
-                    return lambda *args, **kwargs: func(*args, **kwargs)
-
-            self._page.async_: "Page" = PageSafeA(self._page)
-
-        return self._page
-
-    async def goto(self, *args, **kwargs):
-        r = await self._page.goto(*args, **kwargs)
-        return r
+            self.page = await self.first_page()
 
     async def first_page(self) -> "Page":
         page = self.context.pages[0] if self.context.pages else await self.context.new_page()
@@ -348,7 +288,6 @@ class ThreadsafeBrowser:
 
     def check_close_profile(self, path):
         import psutil
-        path_old = set()
         for proc in psutil.process_iter():
             name = proc.name()
             if "chrome.exe" in name:
@@ -367,33 +306,15 @@ class ThreadsafeBrowser:
                     p = os.path.normpath(cmd[cmd.index(user[0]) + 1])
                     if os.path.normpath(path) == p and self.__close_already_profile:
                         proc.terminate()
-                    # path_old.add(os.path.normpath(cmd[cmd.index(user[0]) + 1]))
-
-        # if os.path.normpath(path) in path_old:
-        #     raise Exception("Profile Already Open")
-
-    async def __stop_playwright(self) -> None:
-
-        # NOTE: we need to make sure those were actually launched, in
-        # case of a nasty race condition
-        if hasattr(self, "context"):
-            await self.context.close()
-
-        if hasattr(self, "browser"):
-            await self.browser.close()
-
-        # NOTE: this hangs without the proper child watcher
-        if hasattr(self, "playwright"):
-            await self.playwright.stop()
-
-    def stop(self) -> None:
-        self.loop.call_soon_threadsafe(self.loop.stop)
 
     def __enter__(self):
         return self
 
     def __exit__(self, *args):
         self.stop()
+
+    def stop(self) -> None:
+        self.loop.call_soon_threadsafe(self.loop.stop)
 
     def __thread_worker(self):
         asyncio.set_event_loop(self.loop)
@@ -408,6 +329,19 @@ class ThreadsafeBrowser:
 
         self.loop.run_until_complete(self.__stop_playwright())
 
+    async def __stop_playwright(self) -> None:
+        # NOTE: we need to make sure those were actually launched, in
+        # case of a nasty race condition
+        if hasattr(self, "context"):
+            await self.context.close()
+
+        if hasattr(self, "browser"):
+            await self.browser.close()
+
+        # NOTE: this hangs without the proper child watcher
+        if hasattr(self, "playwright"):
+            await self.playwright.stop()
+
     async def close(self):
         await self.__stop_playwright()
         self.stop()
@@ -421,32 +355,3 @@ class ThreadsafeBrowser:
         )
         result = future.result(timeout=10)
         return result
-
-    @property
-    def sync_(self) -> "Page":
-        return self.page.sync_
-
-    @property
-    def async_(self) -> "Page":
-        return self.page.async_
-
-
-class PageSafe:
-    def __init__(self, page, _run_threadsafe):
-        """
-        Convert All Async Function To Sync
-        Args:
-            page:
-            _run_threadsafe:
-        """
-        self._run_threadsafe = _run_threadsafe
-        for key in page.__dir__():
-            if key.startswith("_"):
-                continue
-
-            func = page.__getattribute__(key)
-            if inspect.iscoroutinefunction(func):
-                self.__setattr__(key, self.async_func(func))
-
-    def async_func(self, func):
-        return lambda *args, **kwargs: self._run_threadsafe(func, *args, **kwargs)
