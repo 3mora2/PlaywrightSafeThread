@@ -353,5 +353,5 @@ class ThreadsafeBrowser:
         future = asyncio.run_coroutine_threadsafe(
             func(*args, **kwargs), self.loop
         )
-        result = future.result(timeout=10)
+        result = future.result(timeout=120)
         return result
