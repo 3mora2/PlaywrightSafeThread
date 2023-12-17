@@ -349,7 +349,7 @@ class ThreadsafeBrowser:
     def sync_close(self):
         self.run_threadsafe(self.close)
 
-    def run_threadsafe(self, func, timeout=120, *args, **kwargs):
+    def run_threadsafe(self, func,  *args, timeout=120, **kwargs):
         future = asyncio.run_coroutine_threadsafe(
             func(*args, **kwargs), self.loop
         )
