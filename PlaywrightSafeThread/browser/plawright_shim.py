@@ -12,8 +12,14 @@ def run_playwright(*args: str) -> int:
     # NOTE: we do this to deal with pyinstaller
     if getattr(sys, "frozen", False):
         env.setdefault("PLAYWRIGHT_BROWSERS_PATH", "0")
+    k = {}
+    if "win" in sys.platform:
+        k["creationflags"] = subprocess.CREATE_NO_WINDOW
 
     driver_executable = compute_driver_executable()
-    completed_process = subprocess.run([str(driver_executable), *args], env=env)
+    completed_process = subprocess.run([str(driver_executable), *args], env=env,
+                                       **k
+                                       )
+
 
     return completed_process.returncode
