@@ -1,4 +1,14 @@
+import logging
 from PlaywrightSafeThread import ThreadsafeBrowser
+
+format = '%(name)s:%(levelname)s:%(message)s'
+
+logging.basicConfig(
+    level=logging.NOTSET,
+    format=format
+)
+
+Logger = logging.getLogger()
 
 # th = ThreadsafeBrowser(browser="chromium")
 # browser = th.run_threadsafe(th.browser_type.launch, channel="chrome", headless=False)

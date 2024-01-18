@@ -18,7 +18,10 @@ def run_playwright(*args: str) -> int:
 
     driver_executable = compute_driver_executable()
     completed_process = subprocess.run([str(driver_executable), *args], env=env,
-                                       **k
+                                       **k,
+                                       # capture_output=True,
+                                       stderr=sys.stderr,
+                                       stdout=sys.stdout
                                        )
 
 
