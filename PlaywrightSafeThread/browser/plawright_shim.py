@@ -17,11 +17,8 @@ def run_playwright(*args: str) -> int:
         k["creationflags"] = subprocess.CREATE_NO_WINDOW
 
     driver_executable = compute_driver_executable()
-    completed_process = subprocess.run([str(driver_executable), *args], env=env,
+    completed_process = subprocess.run([str(driver_executable), *args], env=env, capture_output=True,
                                        **k,
-                                       # capture_output=True,
-                                       stderr=sys.stderr,
-                                       stdout=sys.stdout
                                        )
 
 
