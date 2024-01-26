@@ -2,7 +2,7 @@
 
 import inspect
 import os
-from typing import Callable, TypeVar, Awaitable, Literal, ParamSpec, Concatenate
+from typing import Callable, Literal
 import asyncio
 import platform
 from threading import Thread, Event
@@ -13,10 +13,10 @@ LTE_PY37 = platform.python_version_tuple()[:2] <= ("3", "7")
 
 SUPPORTED_BROWSERS = ("chromium", "firefox", "webkit")
 BrowserName = Literal["chromium", "firefox", "webkit"]
-T = TypeVar("T")
-P = ParamSpec("P")
-PageCallable = Callable[Concatenate[Page, P], Awaitable[T]]
-BrowserCallable = Callable[Concatenate[Browser, P], Awaitable[T]]
+# T = TypeVar("T")
+# P = ParamSpec("P")
+PageCallable = Callable#[Concatenate[Page, P], Awaitable[T]]
+BrowserCallable = Callable#[Concatenate[Browser, P], Awaitable[T]]
 
 
 class ThreadsafeBrowser:
