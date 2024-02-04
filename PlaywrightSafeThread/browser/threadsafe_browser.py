@@ -2,10 +2,15 @@
 
 import inspect
 import os
+import subprocess
+import sys
+import tempfile
 from typing import Callable, Literal
 import asyncio
 import platform
 from threading import Thread, Event
+
+from playwright._impl._driver import compute_driver_executable, get_driver_env
 from playwright.async_api import async_playwright, Page, Browser, BrowserType
 
 UNIX = "windows" not in platform.system().lower()
@@ -15,11 +20,12 @@ SUPPORTED_BROWSERS = ("chromium", "firefox", "webkit")
 BrowserName = Literal["chromium", "firefox", "webkit"]
 # T = TypeVar("T")
 # P = ParamSpec("P")
-PageCallable = Callable#[Concatenate[Page, P], Awaitable[T]]
-BrowserCallable = Callable#[Concatenate[Browser, P], Awaitable[T]]
+PageCallable = Callable  # [Concatenate[Page, P], Awaitable[T]]
+BrowserCallable = Callable  # [Concatenate[Browser, P], Awaitable[T]]
 
 
 class ThreadsafeBrowser:
+    PLAYWRIGHT_BROWSERS_PATH = os.path.join(tempfile.gettempdir(), "PLAYWRIGHT_BROWSERS_PATH")
 
     def __init__(
             self,
@@ -232,9 +238,15 @@ class ThreadsafeBrowser:
             if key in __context_option:
                 self._context_option.update({key: kwargs[key]})
 
-        if install:
-            from PlaywrightSafeThread.browser.plawright_shim import run_playwright
-            run_playwright("install", self._browser_name)
+        os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH",
+                              kwargs.get("PLAYWRIGHT_BROWSERS_PATH") or self.PLAYWRIGHT_BROWSERS_PATH
+                              )
+
+        # if install:
+        #     from PlaywrightSafeThread.browser.plawright_shim import run_playwright
+        #     run_playwright("install", self._browser_name)
+        if not self.check_is_install(self._browser_name):
+            self.run_playwright("install", self._browser_name)
 
         self.__check_open_dir = check_open_dir
         self.__close_already_profile = close_already_profile
@@ -349,9 +361,44 @@ class ThreadsafeBrowser:
     def sync_close(self):
         self.run_threadsafe(self.close)
 
-    def run_threadsafe(self, func,  *args, timeout=120, **kwargs):
+    def run_threadsafe(self, func, *args, timeout=120, **kwargs):
         future = asyncio.run_coroutine_threadsafe(
             func(*args, **kwargs), self.loop
         )
         result = future.result(timeout=timeout)
         return result
+
+    def check_is_install(self, browser):
+        env = self.get_driver_env()
+        k = {}
+        if "win" in sys.platform:
+            k["creationflags"] = subprocess.CREATE_NO_WINDOW
+
+        driver_executable = compute_driver_executable()
+        completed_process = subprocess.check_output(f"{driver_executable} install {browser}  --dry-run", env=env, **k, )
+        locale_ = ":".join(next(filter(lambda x: "Install location" in x,
+                                       completed_process.decode().split("\n")), "").split(":")[1:]).strip()
+
+        return locale_ and os.path.exists(locale_)
+
+    def get_driver_env(self):
+        env = get_driver_env()
+
+        # env["PLAYWRIGHT_BROWSERS_PATH"] =
+        # NOTE: we do this to deal with pyinstaller
+        if getattr(sys, "frozen", False):
+            env.setdefault("PLAYWRIGHT_BROWSERS_PATH", "0")
+        return env
+
+    def run_playwright(self, *args: str):
+        env = self.get_driver_env()
+        k = {}
+        if "win" in sys.platform:
+            k["creationflags"] = subprocess.CREATE_NO_WINDOW
+
+        driver_executable = compute_driver_executable()
+
+        with subprocess.Popen([str(driver_executable), *args], env=env, stdout=subprocess.PIPE,
+                              stderr=subprocess.STDOUT, **k) as process:
+            for line in process.stdout:
+                print(line.decode('utf-8'))
