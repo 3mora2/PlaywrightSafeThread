@@ -344,16 +344,27 @@ class ThreadsafeBrowser:
     async def __stop_playwright(self) -> None:
         # NOTE: we need to make sure those were actually launched, in
         # case of a nasty race condition
-        if hasattr(self, "context"):
-            await self.context.close()
-
-        if hasattr(self, "browser"):
-            await self.browser.close()
-
-        # NOTE: this hangs without the proper child watcher
-        if hasattr(self, "playwright"):
-            await self.playwright.stop()
-
+        try:
+            if hasattr(self, "page") and not self.page.is_closed():
+                await self.page.close()
+        except:
+            pass
+        try:
+            if hasattr(self, "context"):
+                await self.context.close()
+        except:
+            pass
+        try:
+            if hasattr(self, "browser") and self.browser.is_connected():
+                await self.browser.close()
+        except:
+            pass
+        try:
+            # NOTE: this hangs without the proper child watcher
+            if hasattr(self, "playwright"):
+                await self.playwright.stop()
+        except:
+            pass
     async def close(self):
         await self.__stop_playwright()
         self.stop()
