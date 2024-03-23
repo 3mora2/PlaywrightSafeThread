@@ -365,12 +365,14 @@ class ThreadsafeBrowser:
                 await self.playwright.stop()
         except:
             pass
+
     async def close(self):
         await self.__stop_playwright()
         self.stop()
 
     def sync_close(self):
-        self.run_threadsafe(self.close)
+        self.run_threadsafe(self.__stop_playwright)
+        self.stop()
 
     def run_threadsafe(self, func, *args, timeout=120, **kwargs):
         future = asyncio.run_coroutine_threadsafe(
