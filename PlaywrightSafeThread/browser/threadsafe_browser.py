@@ -245,7 +245,7 @@ class ThreadsafeBrowser:
         # if install:
         #     from PlaywrightSafeThread.browser.plawright_shim import run_playwright
         #     run_playwright("install", self._browser_name)
-        if not self.check_is_install(self._browser_name):
+        if install and not self.check_is_install(self._browser_name):
             self.run_playwright("install", self._browser_name)
 
         self.__check_open_dir = check_open_dir

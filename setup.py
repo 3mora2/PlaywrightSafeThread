@@ -4,7 +4,7 @@ from setuptools import setup
 long_description = open("README.md", encoding="utf-8").read()
 description = "PlaywrightSafeThread"
 
-version = "0.4.5"
+version = "0.4.5.1"
 
 setup(
     name="PlaywrightSafeThread",
