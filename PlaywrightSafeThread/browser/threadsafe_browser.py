@@ -353,7 +353,7 @@ class ThreadsafeBrowser:
             if hasattr(self, "page") and not self.page.is_closed():
                 await self.page.close()
         except:
-            Logger.exception("__stop_playwright")
+            pass
         try:
             if hasattr(self, "context"):
                 if hasattr(self.context, "is_connected"):
@@ -362,7 +362,7 @@ class ThreadsafeBrowser:
                 else:
                     await self.context.close()
         except:
-            Logger.exception("__stop_playwright")
+            pass
         try:
             if hasattr(self, "browser"):
                 if hasattr(self.browser, "is_connected"):
@@ -371,13 +371,13 @@ class ThreadsafeBrowser:
                 else:
                     await self.browser.close()
         except:
-            Logger.exception("__stop_playwright")
+            pass
         try:
             # NOTE: this hangs without the proper child watcher
             if hasattr(self, "playwright"):
                 await self.playwright.stop()
         except:
-            Logger.exception("__stop_playwright")
+            pass
 
     def check_close_profile(self, path):
         import psutil
