@@ -1,6 +1,7 @@
 # from: https://github.com/medialab/minet/blob/master/minet/browser/threadsafe_browser.py
 
 import inspect
+import logging
 import os
 import subprocess
 import sys
@@ -22,6 +23,7 @@ BrowserName = Literal["chromium", "firefox", "webkit"]
 # P = ParamSpec("P")
 PageCallable = Callable  # [Concatenate[Page, P], Awaitable[T]]
 BrowserCallable = Callable  # [Concatenate[Browser, P], Awaitable[T]]
+Logger = logging.getLogger("PlaywrightSafeThread")
 
 
 class ThreadsafeBrowser:
@@ -35,6 +37,7 @@ class ThreadsafeBrowser:
             install: bool = False,
             check_open_dir=True,
             close_already_profile=True,
+            loop=None,
             **kwargs
     ) -> None:
         """
@@ -257,7 +260,48 @@ class ThreadsafeBrowser:
 
         # Starting loop thread
         self.thread.start()
+        # Wait Finish Thread
         self.start_event.wait()
+
+    def __thread_worker(self):
+        asyncio.set_event_loop(self.loop)
+        self.loop.run_until_complete(self.__start_playwright())
+        self.start_event.set()
+
+        # NOTE: we are now ready to accept tasks
+        try:
+            self.loop.run_forever()
+        finally:
+            self.loop.run_until_complete(self.loop.shutdown_asyncgens())
+
+        self.loop.run_until_complete(self.__stop_playwright())
+
+    async def create_task(self, task):
+        if asyncio.get_event_loop() == self.loop:
+            return await self.loop.create_task(task)
+        return asyncio.run_coroutine_threadsafe(task, self.loop).result()
+
+    def run_threadsafe(self, task, timeout_=120):
+        if asyncio.get_event_loop() != self.loop:
+            future = asyncio.run_coroutine_threadsafe(
+                task, self.loop
+            )
+            result = future.result(timeout=timeout_)
+            return result
+
+        start_event_task = Event()
+
+        async def run_task(task_):
+            r = await task_
+            start_event_task.set()
+            return r
+
+        future = self.loop.create_task(
+            run_task(task)
+        )
+        start_event_task.wait(timeout_)
+        result = future.result()
+        return result
 
     async def __start_playwright(self) -> None:
         self.playwright = await async_playwright().start()
@@ -290,13 +334,33 @@ class ThreadsafeBrowser:
 
             self.page = await self.first_page()
 
-    async def first_page(self) -> "Page":
-        page = self.context.pages[0] if self.context.pages else await self.context.new_page()
+    def stop(self) -> None:
+        self.loop.call_soon_threadsafe(self.loop.stop)
 
-        if self._stealthy:
-            from playwright_stealth import stealth_async
-            await stealth_async(page)
-        return page
+    async def __stop_playwright(self) -> None:
+        # NOTE: we need to make sure those were actually launched, in
+        # case of a nasty race condition
+        try:
+            if hasattr(self, "page") and not self.page.is_closed():
+                await self.page.close()
+        except:
+            Logger.exception("__stop_playwright")
+        try:
+            if hasattr(self, "context"):
+                await self.context.close()
+        except:
+            Logger.exception("__stop_playwright")
+        try:
+            if hasattr(self, "browser") and self.browser.is_connected():
+                await self.browser.close()
+        except:
+            Logger.exception("__stop_playwright")
+        try:
+            # NOTE: this hangs without the proper child watcher
+            if hasattr(self, "playwright"):
+                await self.playwright.stop()
+        except:
+            Logger.exception("__stop_playwright")
 
     def check_close_profile(self, path):
         import psutil
@@ -325,62 +389,6 @@ class ThreadsafeBrowser:
     def __exit__(self, *args):
         self.stop()
 
-    def stop(self) -> None:
-        self.loop.call_soon_threadsafe(self.loop.stop)
-
-    def __thread_worker(self):
-        asyncio.set_event_loop(self.loop)
-        self.loop.run_until_complete(self.__start_playwright())
-        self.start_event.set()
-
-        # NOTE: we are now ready to accept tasks
-        try:
-            self.loop.run_forever()
-        finally:
-            self.loop.run_until_complete(self.loop.shutdown_asyncgens())
-
-        self.loop.run_until_complete(self.__stop_playwright())
-
-    async def __stop_playwright(self) -> None:
-        # NOTE: we need to make sure those were actually launched, in
-        # case of a nasty race condition
-        try:
-            if hasattr(self, "page") and not self.page.is_closed():
-                await self.page.close()
-        except:
-            pass
-        try:
-            if hasattr(self, "context"):
-                await self.context.close()
-        except:
-            pass
-        try:
-            if hasattr(self, "browser") and self.browser.is_connected():
-                await self.browser.close()
-        except:
-            pass
-        try:
-            # NOTE: this hangs without the proper child watcher
-            if hasattr(self, "playwright"):
-                await self.playwright.stop()
-        except:
-            pass
-
-    async def close(self):
-        await self.__stop_playwright()
-        self.stop()
-
-    def sync_close(self):
-        self.run_threadsafe(self.__stop_playwright)
-        self.stop()
-
-    def run_threadsafe(self, func, *args, timeout=120, **kwargs):
-        future = asyncio.run_coroutine_threadsafe(
-            func(*args, **kwargs), self.loop
-        )
-        result = future.result(timeout=timeout)
-        return result
-
     def check_is_install(self, browser):
         env = self.get_driver_env()
         k = {}
@@ -394,7 +402,8 @@ class ThreadsafeBrowser:
 
         return locale_ and os.path.exists(locale_)
 
-    def get_driver_env(self):
+    @staticmethod
+    def get_driver_env():
         env = get_driver_env()
 
         # env["PLAYWRIGHT_BROWSERS_PATH"] =
@@ -415,3 +424,56 @@ class ThreadsafeBrowser:
                               stderr=subprocess.STDOUT, **k) as process:
             for line in process.stdout:
                 print(line.decode('utf-8'))
+
+    ####################################################################################################################
+    async def first_page(self) -> "Page":
+        page = self.context.pages[0] if self.context.pages else await self.context.new_page()
+
+        if self._stealthy:
+            from playwright_stealth import stealth_async
+            await stealth_async(page)
+        return page
+
+    async def close(self):
+        await self.create_task(self.__stop_playwright())
+        self.stop()
+
+    async def goto(self, url, *args, **kwargs):
+        return await self.create_task(self.page.goto(url, *args, **kwargs))
+
+    async def add_script_tag(self, *args, **kwargs):
+        return await self.create_task(self.page.add_script_tag(*args, **kwargs))
+
+    async def expose_function(self, *args, **kwargs):
+        return await self.create_task(self.page.expose_function(*args, **kwargs))
+
+    async def page_wait_for_function(self, *args, **kwargs):
+        return await self.create_task(self.page.wait_for_function(*args, **kwargs))
+
+    async def page_evaluate(self, *args, **kwargs):
+        return await self.create_task(self.page.evaluate(*args, **kwargs))
+
+    ####################################################################################################################
+    def sleep(self, val, timeout_=None):
+        if timeout_ is None:
+            timeout_ = val if val > 5 else 5
+        self.run_threadsafe(asyncio.sleep(val), timeout_=timeout_)
+
+    def goto_sync(self, url, *args, timeout_=60, **kwargs):
+        return self.run_threadsafe(self.page.goto(url, *args, **kwargs), timeout_=timeout_)
+
+    def add_script_tag_sync(self, *args, timeout_=60, **kwargs):
+        return self.run_threadsafe(self.page.add_script_tag(*args, **kwargs), timeout_=timeout_)
+
+    def expose_function_sync(self, *args, timeout_=60, **kwargs):
+        return self.run_threadsafe(self.page.expose_function(*args, **kwargs), timeout_=timeout_)
+
+    def page_wait_for_function_sync(self, *args, timeout_=60, **kwargs):
+        return self.run_threadsafe(self.page.wait_for_function(*args, **kwargs), timeout_=timeout_)
+
+    def page_evaluate_sync(self, *args, timeout_=60, **kwargs, ):
+        return self.run_threadsafe(self.page.evaluate(*args, **kwargs), timeout_=timeout_)
+
+    def sync_close(self, timeout_=60):
+        self.run_threadsafe(self.__stop_playwright(), timeout_=timeout_)
+        self.stop()
