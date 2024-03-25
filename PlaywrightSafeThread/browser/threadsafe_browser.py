@@ -356,12 +356,20 @@ class ThreadsafeBrowser:
             Logger.exception("__stop_playwright")
         try:
             if hasattr(self, "context"):
-                await self.context.close()
+                if hasattr(self.context, "is_connected"):
+                    if self.context.is_connected():
+                        await self.context.close()
+                else:
+                    await self.context.close()
         except:
             Logger.exception("__stop_playwright")
         try:
-            if hasattr(self, "browser") and self.browser.is_connected():
-                await self.browser.close()
+            if hasattr(self, "browser"):
+                if hasattr(self.browser, "is_connected"):
+                    if self.browser.is_connected():
+                        await self.browser.close()
+                else:
+                    await self.browser.close()
         except:
             Logger.exception("__stop_playwright")
         try:
