@@ -277,12 +277,21 @@ class ThreadsafeBrowser:
         self.loop.run_until_complete(self.__stop_playwright())
 
     async def create_task(self, task):
-        if asyncio.get_event_loop() == self.loop:
+        if self.is_same_loop:
             return await self.loop.create_task(task)
         return asyncio.run_coroutine_threadsafe(task, self.loop).result()
 
+    @property
+    def is_same_loop(self):
+        try:
+            return asyncio.get_event_loop() == self.loop
+        except Exception as e:
+            if 'There is no current event loop in thread' in str(e):
+                return True
+            raise e
+
     def run_threadsafe(self, task, timeout_=120):
-        if asyncio.get_event_loop() != self.loop:
+        if not self.is_same_loop:
             future = asyncio.run_coroutine_threadsafe(
                 task, self.loop
             )
