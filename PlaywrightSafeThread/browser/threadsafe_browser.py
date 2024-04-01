@@ -14,7 +14,9 @@ from threading import Thread, Event
 from playwright._impl._driver import compute_driver_executable, get_driver_env
 from playwright.async_api import async_playwright, Page, Browser, BrowserType
 
-UNIX = "windows" not in platform.system().lower()
+sys_os = platform.system()
+
+UNIX = "windows" not in sys_os.lower()
 LTE_PY37 = platform.python_version_tuple()[:2] <= ("3", "7")
 
 SUPPORTED_BROWSERS = ("chromium", "firefox", "webkit")
@@ -408,12 +410,11 @@ class ThreadsafeBrowser:
 
     def check_is_install(self, browser):
         env = self.get_driver_env()
-        k = {}
-        if "win" in sys.platform:
-            k["creationflags"] = subprocess.CREATE_NO_WINDOW
-
         driver_executable = compute_driver_executable()
-        completed_process = subprocess.check_output(f"{driver_executable} install {browser}  --dry-run", env=env, **k, )
+
+        completed_process = subprocess.check_output(f"{driver_executable} install {browser}  --dry-run", env=env,
+                                                    **creation_flags_dict())
+
         locale_ = ":".join(next(filter(lambda x: "Install location" in x,
                                        completed_process.decode().split("\n")), "").split(":")[1:]).strip()
 
@@ -431,16 +432,12 @@ class ThreadsafeBrowser:
 
     def run_playwright(self, *args: str):
         env = self.get_driver_env()
-        k = {}
-        if "win" in sys.platform:
-            k["creationflags"] = subprocess.CREATE_NO_WINDOW
-
         driver_executable = compute_driver_executable()
 
         with subprocess.Popen([str(driver_executable), *args], env=env, stdout=subprocess.PIPE,
-                              stderr=subprocess.STDOUT, **k) as process:
+                              stderr=subprocess.STDOUT, **creation_flags_dict()) as process:
             for line in process.stdout:
-                print(line.decode('utf-8'))
+                Logger.info(line.decode('utf-8'))
 
     ####################################################################################################################
     async def first_page(self) -> "Page":
@@ -455,20 +452,25 @@ class ThreadsafeBrowser:
         await self.create_task(self.__stop_playwright())
         self.stop()
 
-    async def goto(self, url, *args, **kwargs):
-        return await self.create_task(self.page.goto(url, *args, **kwargs))
+    async def goto(self, url, *args, page=None, **kwargs):
+        page = page or self.page
+        return await self.create_task(page.goto(url, *args, **kwargs))
 
-    async def add_script_tag(self, *args, **kwargs):
-        return await self.create_task(self.page.add_script_tag(*args, **kwargs))
+    async def add_script_tag(self, *args, page=None, **kwargs):
+        page = page or self.page
+        return await self.create_task(page.add_script_tag(*args, **kwargs))
 
-    async def expose_function(self, *args, **kwargs):
-        return await self.create_task(self.page.expose_function(*args, **kwargs))
+    async def expose_function(self, *args, page=None, **kwargs):
+        page = page or self.page
+        return await self.create_task(page.expose_function(*args, **kwargs))
 
-    async def page_wait_for_function(self, *args, **kwargs):
-        return await self.create_task(self.page.wait_for_function(*args, **kwargs))
+    async def page_wait_for_function(self, *args, page=None, **kwargs):
+        page = page or self.page
+        return await self.create_task(page.wait_for_function(*args, **kwargs))
 
-    async def page_evaluate(self, *args, **kwargs):
-        return await self.create_task(self.page.evaluate(*args, **kwargs))
+    async def page_evaluate(self, *args, page=None, **kwargs):
+        page = page or self.page
+        return await self.create_task(page.evaluate(*args, **kwargs))
 
     ####################################################################################################################
     def sleep(self, val, timeout_=None):
@@ -476,21 +478,35 @@ class ThreadsafeBrowser:
             timeout_ = val if val > 5 else 5
         self.run_threadsafe(asyncio.sleep(val), timeout_=timeout_)
 
-    def goto_sync(self, url, *args, timeout_=60, **kwargs):
-        return self.run_threadsafe(self.page.goto(url, *args, **kwargs), timeout_=timeout_)
+    def goto_sync(self, url, *args, page=None, timeout_=60, **kwargs):
+        page = page or self.page
+        return self.run_threadsafe(page.goto(url, *args, **kwargs), timeout_=timeout_)
 
-    def add_script_tag_sync(self, *args, timeout_=60, **kwargs):
-        return self.run_threadsafe(self.page.add_script_tag(*args, **kwargs), timeout_=timeout_)
+    def add_script_tag_sync(self, *args, page=None, timeout_=60, **kwargs):
+        page = page or self.page
+        return self.run_threadsafe(page.add_script_tag(*args, **kwargs), timeout_=timeout_)
 
-    def expose_function_sync(self, *args, timeout_=60, **kwargs):
-        return self.run_threadsafe(self.page.expose_function(*args, **kwargs), timeout_=timeout_)
+    def expose_function_sync(self, *args, page=None, timeout_=60, **kwargs):
+        page = page or self.page
+        return self.run_threadsafe(page.expose_function(*args, **kwargs), timeout_=timeout_)
 
-    def page_wait_for_function_sync(self, *args, timeout_=60, **kwargs):
-        return self.run_threadsafe(self.page.wait_for_function(*args, **kwargs), timeout_=timeout_)
+    def page_wait_for_function_sync(self, *args, page=None, timeout_=60, **kwargs):
+        page = page or self.page
+        return self.run_threadsafe(page.wait_for_function(*args, **kwargs), timeout_=timeout_)
 
-    def page_evaluate_sync(self, *args, timeout_=60, **kwargs, ):
-        return self.run_threadsafe(self.page.evaluate(*args, **kwargs), timeout_=timeout_)
+    def page_evaluate_sync(self, *args, page=None, timeout_=60, **kwargs, ):
+        page = page or self.page
+        return self.run_threadsafe(page.evaluate(*args, **kwargs), timeout_=timeout_)
 
     def sync_close(self, timeout_=60):
         self.run_threadsafe(self.__stop_playwright(), timeout_=timeout_)
         self.stop()
+
+
+def creation_flags_dict():
+    try:
+        if sys_os == 'Windows':
+            return {"creationflags": subprocess.CREATE_NO_WINDOW}
+    except:
+        Logger.exception("creation_flags_dict")
+    return {}
