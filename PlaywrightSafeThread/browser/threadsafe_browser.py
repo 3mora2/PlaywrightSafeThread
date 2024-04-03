@@ -40,6 +40,7 @@ class ThreadsafeBrowser:
             check_open_dir=True,
             close_already_profile=True,
             loop=None,
+            playwright_path_env=True,
             **kwargs
     ) -> None:
         """
@@ -243,9 +244,10 @@ class ThreadsafeBrowser:
             if key in __context_option:
                 self._context_option.update({key: kwargs[key]})
 
-        os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH",
-                              kwargs.get("PLAYWRIGHT_BROWSERS_PATH") or self.PLAYWRIGHT_BROWSERS_PATH
-                              )
+        if playwright_path_env:
+            os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH",
+                                  kwargs.get("PLAYWRIGHT_BROWSERS_PATH") or self.PLAYWRIGHT_BROWSERS_PATH
+                                  )
 
         # if install:
         #     from PlaywrightSafeThread.browser.plawright_shim import run_playwright
