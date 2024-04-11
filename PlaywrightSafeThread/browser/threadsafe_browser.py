@@ -414,7 +414,7 @@ class ThreadsafeBrowser:
         env = self.get_driver_env()
         driver_executable, driver_cli = compute_driver_executable()
 
-        completed_process = subprocess.check_output(f"{driver_executable} {driver_cli} install {browser}  --dry-run", env=env,
+        completed_process = subprocess.check_output([driver_executable, driver_cli, 'install', browser, '--dry-run'], env=env,
                                                     **creation_flags_dict())
 
         locale_ = ":".join(next(filter(lambda x: "Install location" in x,
