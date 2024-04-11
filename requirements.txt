@@ -1,5 +1,5 @@
 greenlet
-playwright
+playwright>=1.43.0
 playwright-stealth
 psutil
 pyee

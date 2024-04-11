@@ -412,9 +412,9 @@ class ThreadsafeBrowser:
 
     def check_is_install(self, browser):
         env = self.get_driver_env()
-        driver_executable = compute_driver_executable()
+        driver_executable, driver_cli = compute_driver_executable()
 
-        completed_process = subprocess.check_output(f"{driver_executable} install {browser}  --dry-run", env=env,
+        completed_process = subprocess.check_output(f"{driver_executable} {driver_cli} install {browser}  --dry-run", env=env,
                                                     **creation_flags_dict())
 
         locale_ = ":".join(next(filter(lambda x: "Install location" in x,
@@ -434,9 +434,9 @@ class ThreadsafeBrowser:
 
     def run_playwright(self, *args: str):
         env = self.get_driver_env()
-        driver_executable = compute_driver_executable()
+        driver_executable, driver_cli = compute_driver_executable()
 
-        with subprocess.Popen([str(driver_executable), *args], env=env, stdout=subprocess.PIPE,
+        with subprocess.Popen([driver_executable, driver_cli, *args], env=env, stdout=subprocess.PIPE,
                               stderr=subprocess.STDOUT, **creation_flags_dict()) as process:
             for line in process.stdout:
                 Logger.info(line.decode('utf-8'))
