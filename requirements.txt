@@ -4,3 +4,4 @@ playwright-stealth
 psutil
 pyee
 typing_extensions
+
