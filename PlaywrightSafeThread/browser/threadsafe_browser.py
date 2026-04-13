@@ -273,9 +273,8 @@ class ThreadsafeBrowser:
 
         self.loop = asyncio.new_event_loop()
         self.start_event = Event()
-        # self.thread = Thread(target=self.__thread_worker, daemon=True)
         self.thread = Thread(
-            name="Thread-browser-%i" % id(self), target=self.__thread_worker
+            name="Thread-browser-%i" % id(self), target=self.__thread_worker, daemon=True
         )
 
         # TODO::
@@ -314,12 +313,14 @@ class ThreadsafeBrowser:
 
     @property
     def is_same_loop(self):
+        # Use get_running_loop() — the modern Python 3.7+ API.
+        # Returns the loop that is *currently executing* in this thread.
+        # Raises RuntimeError when no loop is running (e.g. a plain worker
+        # thread), in which case we are definitely not on the same loop.
         try:
-            return asyncio.get_event_loop() == self.loop
-        except Exception as e:
-            if 'There is no current event loop in thread' in str(e):
-                return True
-            raise e
+            return asyncio.get_running_loop() == self.loop
+        except RuntimeError:
+            return False
 
     def run_threadsafe(self, task, *args, timeout_=120, **kwargs):
         if not asyncio.iscoroutine(task):
@@ -340,21 +341,25 @@ class ThreadsafeBrowser:
             # result = future.result(timeout=timeout_)
             # return result
 
-        # TODO :: use __handle_future
         start_event_task = Event()
 
         async def run_task(task_):
-            r = await task_
-            start_event_task.set()
-            return r
+            try:
+                return await task_
+            finally:
+                # Always signal completion — even when the task raises,
+                # so the waiting thread is never left blocking until timeout.
+                start_event_task.set()
 
-        future = self.loop.create_task(
-            run_task(task)
-        )
+        future = self.loop.create_task(run_task(task))
 
-        start_event_task.wait(timeout_)
-        result = future.result()
-        return result
+        completed = start_event_task.wait(timeout_)
+        if not completed:
+            future.cancel()
+            raise TimeoutError(f"Task did not complete within {timeout_}s")
+
+        # future.result() re-raises any exception the task threw
+        return future.result()
 
     async def __start_playwright(self) -> None:
         self.playwright = await async_playwright().start()
